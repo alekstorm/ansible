@@ -304,13 +304,13 @@ def template(basedir, varname, vars, lookup_fatal=True, depth=0, expand_lists=Tr
             first_part = varname.split(".")[0].split("[")[0]
             if first_part in vars and '{{' not in varname and '$' not in varname:
                 varname = "{{%s}}" % varname
-    
+
         if isinstance(varname, basestring):
             if '{{' in varname or '{%' in varname:
                 varname = template_from_string(basedir, varname, vars, fail_on_undefined)
             if not '$' in varname:
                 return varname
-    
+
             m = _legacy_varFind(basedir, varname, vars, lookup_fatal, depth, expand_lists)
             if not m:
                 return varname
@@ -323,7 +323,7 @@ def template(basedir, varname, vars, lookup_fatal=True, depth=0, expand_lists=Tr
             else:
                 Flags.LEGACY_TEMPLATE_WARNING = True
                 return legacy_varReplace(basedir, varname, vars, lookup_fatal, depth, expand_lists)
-    
+
         elif isinstance(varname, (list, tuple)):
             return [template(basedir, v, vars, lookup_fatal, depth, expand_lists, fail_on_undefined=fail_on_undefined) for v in varname]
         elif isinstance(varname, dict):
@@ -511,7 +511,7 @@ def template_from_string(basedir, data, vars, fail_on_undefined=False):
 
         res = jinja2.utils.concat(t.root_render_func(t.new_context(_jinja2_vars(basedir, vars, t.globals, fail_on_undefined), shared=True)))
         return res
-    except jinja2.exceptions.UndefinedError:
+    except (jinja2.exceptions.UndefinedError, errors.AnsibleUndefinedVariable):
         if fail_on_undefined:
             raise
         else:
