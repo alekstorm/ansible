@@ -138,7 +138,9 @@ class Runner(object):
         diff=False,                         # whether to show diffs for template files that change
         environment=None,                   # environment variables (as dict) to use inside the command
         complex_args=None,                  # structured data in addition to module_args, must be a dict
-        error_on_undefined_vars=C.DEFAULT_UNDEFINED_VAR_BEHAVIOR # ex. False
+        error_on_undefined_vars=C.DEFAULT_UNDEFINED_VAR_BEHAVIOR, # ex. False
+        retries=0,
+        retry_interval=None
         ):
 
         # used to lock multiprocess inputs and outputs at various levels
@@ -180,6 +182,8 @@ class Runner(object):
         self.environment      = environment
         self.complex_args     = complex_args
         self.error_on_undefined_vars = error_on_undefined_vars
+        self.retries          = retries
+        self.retry_interval   = retry_interval
         self.callbacks.runner = self
 
         # if the transport is 'smart' see if SSH can support ControlPersist if not use paramiko
@@ -619,57 +623,76 @@ class Runner(object):
             result = dict(failed=True, msg="FAILED: %s" % str(e))
             return ReturnData(host=host, comm_ok=False, result=result)
 
-        tmp = ''
-        # all modules get a tempdir, action plugins get one unless they have NEEDS_TMPPATH set to False
-        if getattr(handler, 'NEEDS_TMPPATH', True):
-            tmp = self._make_tmp_path(conn)
+        retries = 0
+        retrying = True
+        while retrying:
+            retrying = False
 
-        # render module_args and complex_args templates
-        try:
-            module_args = template.template(self.basedir, module_args, inject, fail_on_undefined=self.error_on_undefined_vars)
-            complex_args = template.template(self.basedir, complex_args, inject, fail_on_undefined=self.error_on_undefined_vars)
-        except jinja2.exceptions.UndefinedError, e:
-            raise errors.AnsibleUndefinedVariable("One or more undefined variables: %s" % str(e))
+            tmp = ''
+            # all modules get a tempdir, action plugins get one unless they have NEEDS_TMPPATH set to False
+            if getattr(handler, 'NEEDS_TMPPATH', True):
+                tmp = self._make_tmp_path(conn)
 
+            # render module_args and complex_args templates
+            try:
+                module_args = template.template(self.basedir, module_args, inject, fail_on_undefined=self.error_on_undefined_vars)
+                complex_args = template.template(self.basedir, complex_args, inject, fail_on_undefined=self.error_on_undefined_vars)
+            except jinja2.exceptions.UndefinedError, e:
+                raise errors.AnsibleUndefinedVariable("One or more undefined variables: %s" % str(e))
 
-        result = handler.run(conn, tmp, module_name, module_args, inject, complex_args)
+            exception = None
+            result = None
+            try:
+                result = handler.run(conn, tmp, module_name, module_args, inject, complex_args)
+            except errors.AnsibleError, e:
+                exception = e
+            finally:
+                conn.close()
 
-        conn.close()
-
-        if not result.comm_ok:
-            # connection or parsing errors...
-            self.callbacks.on_unreachable(host, result.result)
-        else:
-            data = result.result
-            if 'item' in inject:
-                result.result['item'] = inject['item']
-
-            result.result['invocation'] = dict(
-                module_args=module_args,
-                module_name=module_name
-            )
-
-            changed_when = self.module_vars.get('changed_when')
-            if changed_when is not None:
-                register = self.module_vars.get('register')
-                if  register is not None:
-                    if 'stdout' in data:
-                        data['stdout_lines'] = data['stdout'].splitlines()
-                    inject[register] = data
-                data['changed'] = utils.check_conditional(changed_when, self.basedir, inject, fail_on_undefined=self.error_on_undefined_vars)
-
-            if is_chained:
-                # no callbacks
-                return result
-            if 'skipped' in data:
-                self.callbacks.on_skipped(host)
-            elif not result.is_successful():
-                ignore_errors = self.module_vars.get('ignore_errors', False)
-                self.callbacks.on_failed(host, data, ignore_errors)
+            if result is not None and not result.comm_ok:
+                # connection or parsing errors...
+                self.callbacks.on_unreachable(host, result.result)
             else:
-                if self.diff:
-                    self.callbacks.on_file_diff(conn.host, result.diff)
-                self.callbacks.on_ok(host, data)
+                if exception is not None or not result.is_successful():
+                    if retries < self.retries:
+                        retries += 1
+                        retrying = True
+                        time.sleep(self.retry_interval)
+                    elif exception is not None:
+                        raise exception
+
+                if not retrying:
+                    data = result.result
+                    if 'item' in inject:
+                        result.result['item'] = inject['item']
+
+                    result.result['invocation'] = dict(
+                        module_args=module_args,
+                        module_name=module_name
+                    )
+
+                    changed_when = self.module_vars.get('changed_when')
+                    if changed_when is not None:
+                        register = self.module_vars.get('register')
+                        if  register is not None:
+                            if 'stdout' in data:
+                                data['stdout_lines'] = data['stdout'].splitlines()
+                            inject[register] = data
+                        data['changed'] = utils.check_conditional(changed_when, self.basedir, inject, fail_on_undefined=self.error_on_undefined_vars)
+
+                    data['retries'] = retries
+
+                    if not is_chained: # no callbacks if chained
+                        if result.is_successful():
+                            if 'skipped' in data:
+                                self.callbacks.on_skipped(host)
+                            else:
+                                if self.diff:
+                                    self.callbacks.on_file_diff(conn.host, result.diff)
+                                self.callbacks.on_ok(host, data)
+                        else:
+                            ignore_errors = self.module_vars.get('ignore_errors', False)
+                            self.callbacks.on_failed(host, data, ignore_errors)
         return result
 
     # *****************************************************
