@@ -92,7 +92,7 @@ class HostVars(collections.Mapping):
     def __getitem__(self, host):
         if not host in self.lookup:
             result = self.inventory.get_variables(host)
-            result.update(self.setup_cache.get(host, {}))
+            result.update(utils.combine_vars(result, self.setup_cache.get(host, {})))
             self.lookup[host] = result
         return self.lookup[host]
 
