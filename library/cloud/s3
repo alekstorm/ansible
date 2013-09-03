@@ -57,7 +57,7 @@ options:
     version_added: "1.2"
   mode:
     description:
-      - Switches the module behaviour between put (upload), get (download), geturl (return download url (Ansible 1.3+), getstr (download object as string (1.3+)), create (bucket) and delete (bucket). 
+      - Switches the module behaviour between put (upload), get (download), geturl (return download url (Ansible 1.3+), getstr (download object as string (1.3+)), list (bucket), create (bucket) and delete (bucket).
     required: true
     default: null
     aliases: []
@@ -249,12 +249,14 @@ def main():
             object         = dict(),
             src            = dict(),
             dest           = dict(),
-            mode           = dict(choices=['get', 'put', 'delete', 'create', 'geturl', 'getstr'], required=True),
+            mode           = dict(choices=['get', 'put', 'delete', 'list', 'create', 'geturl', 'getstr'], required=True),
             expiry         = dict(default=600, aliases=['expiration']),
             s3_url         = dict(aliases=['S3_URL']),
             aws_secret_key  = dict(aliases=['ec2_secret_key', 'secret_key'], no_log=True, required=False),
             aws_access_key  = dict(aliases=['ec2_access_key', 'access_key'], required=False),
             overwrite      = dict(default=False, type='bool'),
+            prefix         = dict(default=''),
+            delimiter      = dict(default='')
         ),
     )
 
@@ -268,7 +270,9 @@ def main():
     aws_secret_key = module.params.get('aws_secret_key')
     aws_access_key = module.params.get('aws_access_key')
     overwrite = module.params.get('overwrite')
-    
+    prefix = module.params.get('prefix')
+    delimiter = module.params.get('delimiter')
+
     if module.params.get('object'):
         obj = os.path.expanduser(module.params['object'])
 
@@ -300,7 +304,18 @@ def main():
             s3 = boto.connect_s3(aws_access_key, aws_secret_key)
         except boto.exception.NoAuthHandlerFound, e:
             module.fail_json(msg = str(e))
- 
+
+    if mode == 'list':
+        if not bucket_check(module, s3, bucket):
+            module.fail_json(msg="Target bucket cannot be found", failed=True)
+            sys.exit(0)
+
+        bucket = s3.get_bucket(bucket)
+        names = []
+        for key in bucket.list(prefix=prefix, delimiter=delimiter):
+            names.append(key.name)
+        module.exit_json(msg="Bucket listing complete", names=names, changed=False)
+
     # If our mode is a GET operation (download), go through the procedure as appropriate ...
     if mode == 'get':
     
