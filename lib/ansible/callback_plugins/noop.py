@@ -69,7 +69,7 @@ class CallbackModule(object):
     def playbook_on_no_hosts_remaining(self):
         pass
 
-    def playbook_on_task_start(self, name, is_conditional):
+    def playbook_on_task_start(self, name, is_conditional, skipped):
         pass
 
     def playbook_on_vars_prompt(self, varname, private=True, prompt=None, encrypt=None, confirm=False, salt_size=None, salt=None, default=None):

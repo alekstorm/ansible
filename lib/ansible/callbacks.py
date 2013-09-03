@@ -602,7 +602,7 @@ class PlaybookCallbacks(object):
             self.skip_task = False
             display(banner(msg))
 
-        call_callback_module('playbook_on_task_start', name, is_conditional)
+        call_callback_module('playbook_on_task_start', name, is_conditional, self.skip_task)
 
     def on_vars_prompt(self, varname, private=True, prompt=None, encrypt=None, confirm=False, salt_size=None, salt=None, default=None):
 
