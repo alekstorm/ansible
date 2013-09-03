@@ -72,44 +72,44 @@ class VarsModule(object):
             if inventory_basedir == self.pb_basedir and scan_pass != 1:
                 continue
 
-            # load vars in dir/group_vars/name_of_group
-            for x in groups:
+            def load_vars(vars_dir, files, match):
+                vars_path = os.path.join(basedir, vars_dir)
 
-                p = os.path.join(basedir, "group_vars/%s" % x)
+                vars_results = {}
+                if os.path.isfile(vars_path):
+                    data = utils.parse_yaml_from_file(vars_path)
+                    if type(data) != list:
+                        raise errors.AnsibleError("%s must be stored as a list" % vars_path)
 
-                # the file can be <groupname> or end in .yml or .yaml
-                # currently ALL will be loaded, even if more than one
-                paths = [p, '.'.join([p, 'yml']), '.'.join([p, 'yaml'])]
+                    for item in data:
+                        if match(item['pattern']):
+                            # combine vars overrides by default but can be
+                            # configured to do a hash merge in settings
+                            vars_results = utils.combine_vars(vars_results, item['vars'])
+                else:
+                    # load vars in dir/vars_dir/name_of_group
+                    for f in files:
+                        # the file can have no extension, or end in .yml or .yaml
+                        # currently ALL will be loaded, even if more than one
+                        p = os.path.join(vars_path, f)
+                        for path in [p, "%s.yml" % p, "%s.yaml" % p]:
+                            if os.path.isfile(path):
+                                data = utils.parse_yaml_from_file(path)
+                                if type(data) != dict:
+                                    raise errors.AnsibleError("%s must be stored as a dictionary/hash" % path)
 
-                for path in paths:
+                                vars_results = utils.combine_vars(vars_results, data)
+                return vars_results
 
-                    if os.path.exists(path) and not os.path.isdir(path):
-                        data = utils.parse_yaml_from_file(path)
-                        if type(data) != dict:
-                            raise errors.AnsibleError("%s must be stored as a dictionary/hash" % path)
-
-                        # combine vars overrides by default but can be configured to do a hash
-                        # merge in settings
-
-                        results = utils.combine_vars(results, data)
+            results = utils.combine_vars(results,
+                load_vars("group_vars", groups, lambda key: host.name in inventory.list_hosts(key)))
 
             # group vars have been loaded
             # load vars in inventory_dir/hosts_vars/name_of_host
             # these have greater precedence than group variables
 
-            p = os.path.join(basedir, "host_vars/%s" % host.name)
-
-            # again allow the file to be named filename or end in .yml or .yaml
-            paths = [p, '.'.join([p, 'yml']), '.'.join([p, 'yaml'])]
-
-            for path in paths:
-
-                if os.path.exists(path) and not os.path.isdir(path):
-                    data = utils.parse_yaml_from_file(path)
-                    if type(data) != dict:
-                        raise errors.AnsibleError("%s must be stored as a dictionary/hash" % path)
-                    results = utils.combine_vars(results, data)
+            results = utils.combine_vars(results,
+                load_vars("host_vars", host.name, lambda key: host.name == key))
 
         # all done, results is a dictionary of variables for this particular host.
         return results
-
