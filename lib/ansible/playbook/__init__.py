@@ -313,7 +313,8 @@ class PlayBook(object):
             sudo=task.sudo, sudo_user=task.sudo_user,
             transport=task.transport, sudo_pass=task.sudo_pass, is_playbook=True,
             check=self.check, diff=self.diff, environment=task.environment, complex_args=task.args,
-            error_on_undefined_vars=C.DEFAULT_UNDEFINED_VAR_BEHAVIOR
+            error_on_undefined_vars=C.DEFAULT_UNDEFINED_VAR_BEHAVIOR,
+            retries=task.retries, retry_interval=task.retry_interval
         )
 
         if task.async_seconds == 0:
