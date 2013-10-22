@@ -40,10 +40,11 @@ EXAMPLES = '''
   action: debug msg="This instance is a t1.micro"
   when: ansible_ec2_instance_type == "t1.micro"
 '''
-   
-import urllib2
-import socket
+
+import json
 import re
+import socket
+import urllib2
 
 socket.setdefaulttimeout(5)
 
@@ -90,7 +91,7 @@ class Ec2Metadata(object):
         for pattern in filter_patterns:
             for key in new_fields.keys():
                 match = re.search(pattern, key)
-                if match: 
+                if match:
                     new_fields.pop(key)
         return new_fields
 
@@ -140,10 +141,13 @@ class Ec2Metadata(object):
                     break
             data['ansible_ec2_placement_region'] = region
 
-    def run(self):
+    def run(self, user_data_format):
         self.fetch(self.uri_meta) # populate _data
         data = self._mangle_fields(self._data, self.uri_meta)
-        data[self._prefix % 'user-data'] = self._fetch(self.uri_user)
+        user_data = self._fetch(self.uri_user)
+        if user_data_format == 'json':
+            user_data = json.loads(user_data)
+        data[self._prefix % 'user-data'] = user_data
         data[self._prefix % 'public-key'] = self._fetch(self.uri_ssh)
         self.fix_invalid_varnames(data)
         self.add_ec2_region(data)
@@ -151,13 +155,16 @@ class Ec2Metadata(object):
 
 def main():
 
-    ec2_facts = Ec2Metadata().run()
-    ec2_facts_result = dict(changed=False, ansible_facts=ec2_facts)
-
     module = AnsibleModule(
-        argument_spec = dict(),
+        argument_spec = dict(
+            user_data_format=dict(choices=['raw', 'json'], default='raw')
+        ),
         supports_check_mode = True,
     )
+
+    ec2_facts = Ec2Metadata().run(module.params['user_data_format'])
+    ec2_facts_result = dict(changed=False, ansible_facts=ec2_facts)
+
     module.exit_json(**ec2_facts_result)
 
 # this is magic, see lib/ansible/module_common.py
